@@ -17,7 +17,12 @@ void ConversionPass::execute(RenderContext &renderContext)
     renderContext.numberOfGaussians = 0;
     glUtils::resetAtomicCounter(renderContext.atomicCounterBufferConversionPass);
 
-    GLsizeiptr bufferSize = renderContext.resolutionTarget * renderContext.resolutionTarget * sizeof(glm::vec4) * 6 * 6; //Last *6 is just to avoid running out of space
+    // Scale buffer capacity by mesh count so multi-mesh GLBs have room for all gaussians
+    unsigned int meshCount = static_cast<unsigned int>(std::max(size_t(1), renderContext.dataMeshAndGlMesh.size()));
+    unsigned int maxGaussians = renderContext.resolutionTarget * renderContext.resolutionTarget * 6 * meshCount;
+    // We clamp to MAX_GAUSSIANS_TO_SORT since downstream buffers (sort, prepass) are fixed at that size
+    maxGaussians = std::min(maxGaussians, static_cast<unsigned int>(MAX_GAUSSIANS_TO_SORT));
+    GLsizeiptr bufferSize = static_cast<GLsizeiptr>(maxGaussians) * sizeof(glm::vec4) * 6;
     GLint currentSize;
     
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, renderContext.gaussianBuffer);    
@@ -26,6 +31,9 @@ void ConversionPass::execute(RenderContext &renderContext)
     if (currentSize != bufferSize) {
         glBufferData(GL_SHADER_STORAGE_BUFFER, bufferSize, nullptr, GL_DYNAMIC_DRAW);
     }
+
+    GLuint converterProgramIDSetup = renderContext.shaderRegistry.getProgramID(glUtils::ShaderProgramTypes::ConverterProgram);
+    glUtils::setUniform1i(converterProgramIDSetup, "u_maxGaussians", static_cast<int>(maxGaussians));
 
     GLuint framebuffer;
     GLuint drawBuffers = glUtils::setupFrameBuffer(framebuffer, renderContext.resolutionTarget, renderContext.resolutionTarget);
@@ -65,6 +73,10 @@ void ConversionPass::conversion(
 {
 
     GLuint converterProgramID = renderContext.shaderRegistry.getProgramID(glUtils::ShaderProgramTypes::ConverterProgram);
+
+    glUtils::setUniform1i(converterProgramID, "hasAlbedoMap", 0);
+    glUtils::setUniform1i(converterProgramID, "hasNormalMap", 0);
+    glUtils::setUniform1i(converterProgramID, "hasMetallicRoughnessMap", 0);
 
     if (renderContext.meshToTextureData.find(mesh.first.name) != renderContext.meshToTextureData.end())
     {

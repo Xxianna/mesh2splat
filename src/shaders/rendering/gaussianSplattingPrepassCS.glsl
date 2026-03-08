@@ -253,7 +253,7 @@ void main() {
     vec2 diagonalVector = normalize(vec2(1, (-cov2d[0][0]+cov2d[0][1]+lambda1)/(cov2d[0][1]-cov2d[1][1]+lambda1)));
 	vec2 majorAxis = min(3 * sqrt(lambda1), 1024.0) * diagonalVector;
     vec2 minorAxis = min(3 * sqrt(lambda2), 1024.0) * vec2(diagonalVector.y, -diagonalVector.x);
-
+	
 	vec2 majorAxisMultiplier =  majorAxis / (u_resolution * 0.5);
 	vec2 minorAxisMultiplier =  minorAxis / (u_resolution * 0.5);
 

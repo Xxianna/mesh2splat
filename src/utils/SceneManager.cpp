@@ -6,6 +6,9 @@
 #include "SceneManager.hpp"
 #include <iostream>
 #include <cstring>
+#include <functional>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 SceneManager::SceneManager(RenderContext& context) : renderContext(context)
 {
@@ -207,40 +210,154 @@ bool SceneManager::parseGltfFile(const std::string& filePath, const std::string&
         std::cout << "glTF parse warning: " << warn << std::endl;
     }
 
+    struct MeshInstance {
+        int meshIndex;
+        glm::mat4 transform;
+    };
+    std::vector<MeshInstance> meshInstances;
+
+    std::function<void(int, const glm::mat4&)> traverseNode = [&](int nodeIndex, const glm::mat4& parentTransform) {
+        if (nodeIndex < 0 || nodeIndex >= static_cast<int>(model.nodes.size())) return;
+        const tinygltf::Node& node = model.nodes[nodeIndex];
+
+        // Build local transform
+        glm::mat4 localTransform(1.0f);
+
+        if (node.matrix.size() == 16) {
+            // Column-major matrix provided directly
+            for (int c = 0; c < 4; c++)
+                for (int r = 0; r < 4; r++)
+                    localTransform[c][r] = static_cast<float>(node.matrix[c * 4 + r]);
+        } else {
+            // TRS
+            glm::mat4 T(1.0f), R(1.0f), S(1.0f);
+            if (node.translation.size() == 3) {
+                T = glm::translate(glm::mat4(1.0f), glm::vec3(
+                    static_cast<float>(node.translation[0]),
+                    static_cast<float>(node.translation[1]),
+                    static_cast<float>(node.translation[2])));
+            }
+            if (node.rotation.size() == 4) {
+                glm::quat q(
+                    static_cast<float>(node.rotation[3]),  // w
+                    static_cast<float>(node.rotation[0]),  // x
+                    static_cast<float>(node.rotation[1]),  // y
+                    static_cast<float>(node.rotation[2])); // z
+                R = glm::mat4_cast(q);
+            }
+            if (node.scale.size() == 3) {
+                S = glm::scale(glm::mat4(1.0f), glm::vec3(
+                    static_cast<float>(node.scale[0]),
+                    static_cast<float>(node.scale[1]),
+                    static_cast<float>(node.scale[2])));
+            }
+            localTransform = T * R * S;
+        }
+
+        glm::mat4 worldTransform = parentTransform * localTransform;
+
+        if (node.mesh >= 0 && node.mesh < static_cast<int>(model.meshes.size())) {
+            meshInstances.push_back({ node.mesh, worldTransform });
+        }
+
+        for (int child : node.children) {
+            traverseNode(child, worldTransform);
+        }
+    };
+
+    // Traverse the scene graph to collect mesh instances with their world transforms
+    if (!model.scenes.empty()) {
+        int sceneIndex = model.defaultScene >= 0 ? model.defaultScene : 0;
+        const tinygltf::Scene& scene = model.scenes[sceneIndex];
+        for (int rootNode : scene.nodes) {
+            traverseNode(rootNode, glm::mat4(1.0f));
+        }
+    }
+
+    // Fallback: if no mesh instances were found via the scene graph we add all meshes with identity transform
+    if (meshInstances.empty()) {
+        for (int i = 0; i < static_cast<int>(model.meshes.size()); i++) {
+            meshInstances.push_back({ i, glm::mat4(1.0f) });
+        }
+    }
+
     //remember that "when a 3D model is created as GLTF it is already triangulated"
-    int index = 0;
+    int meshCounter = 0;
 
-    for (const auto& mesh : model.meshes) {
+    for (const auto& instance : meshInstances) {
+        const tinygltf::Mesh& mesh = model.meshes[instance.meshIndex];
+        glm::mat4 worldTransform = instance.transform;
+        glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(worldTransform)));
+
         for (const auto& primitive : mesh.primitives) {
-            std::string baseName = "mesh";
-            utils::Mesh myMesh(baseName.append(std::to_string(index)));
-            ++index;
-            const tinygltf::Accessor& indicesAccessor = model.accessors[primitive.indices];
-            const tinygltf::BufferView& bufferView = model.bufferViews[indicesAccessor.bufferView];
-            const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
-            const unsigned char* indexData = buffer.data.data() + bufferView.byteOffset + indicesAccessor.byteOffset;
-            std::vector<int> indices(indicesAccessor.count);
+            // Skip non-triangle primitives
+            if (primitive.mode != TINYGLTF_MODE_TRIANGLES && primitive.mode != -1) {
+                std::cout << "Skipping non-triangle primitive (mode=" << primitive.mode << ") in mesh: " << mesh.name << std::endl;
+                continue;
+            }
 
-            if (indicesAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-                const uint16_t* buf = reinterpret_cast<const uint16_t*>(indexData);
-                for (size_t i = 0; i < indicesAccessor.count; i++) {
-                    indices[i] = buf[i];
+            // Must have POSITION attribute
+            if (primitive.attributes.find("POSITION") == primitive.attributes.end()) {
+                std::cerr << "Warning: Primitive in mesh '" << mesh.name << "' has no POSITION attribute, skipping." << std::endl;
+                continue;
+            }
+
+            std::string baseName = mesh.name.empty() ? "mesh" : mesh.name;
+            utils::Mesh myMesh(baseName + "_" + std::to_string(meshCounter));
+            ++meshCounter;
+
+            // --- Build index list ---
+            std::vector<uint32_t> indices;
+
+            if (primitive.indices >= 0) {
+                const tinygltf::Accessor& indicesAccessor = model.accessors[primitive.indices];
+                const tinygltf::BufferView& bufferView = model.bufferViews[indicesAccessor.bufferView];
+                const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+                const unsigned char* indexData = buffer.data.data() + bufferView.byteOffset + indicesAccessor.byteOffset;
+                indices.resize(indicesAccessor.count);
+
+                if (indicesAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                    const uint16_t* buf = reinterpret_cast<const uint16_t*>(indexData);
+                    for (size_t i = 0; i < indicesAccessor.count; i++) {
+                        indices[i] = buf[i];
+                    }
+                }
+                else if (indicesAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
+                    const uint32_t* buf = reinterpret_cast<const uint32_t*>(indexData);
+                    for (size_t i = 0; i < indicesAccessor.count; i++) {
+                        indices[i] = buf[i];
+                    }
+                }
+                else if (indicesAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
+                    const uint8_t* buf = reinterpret_cast<const uint8_t*>(indexData);
+                    for (size_t i = 0; i < indicesAccessor.count; i++) {
+                        indices[i] = buf[i];
+                    }
+                }
+                else {
+                    std::cerr << "Warning: Unsupported index component type " << indicesAccessor.componentType << " in mesh '" << mesh.name << "', skipping primitive." << std::endl;
+                    continue;
+                }
+            } else {
+                // Non-indexed geometry: generate sequential indices
+                const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
+                indices.resize(posAccessor.count);
+                for (uint32_t i = 0; i < static_cast<uint32_t>(posAccessor.count); i++) {
+                    indices[i] = i;
                 }
             }
 
-            else if (indicesAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-                const uint32_t* buf = reinterpret_cast<const uint32_t*>(indexData);
-                for (size_t i = 0; i < indicesAccessor.count; i++) {
-                    indices[i] = buf[i];
-                }
+            if (indices.size() < 3 || indices.size() % 3 != 0) {
+                std::cerr << "Warning: Invalid index count (" << indices.size() << ") in mesh '" << mesh.name << "', skipping primitive." << std::endl;
+                continue;
             }
 
-            // Extract vertex data, I assume the glb mesh to always have position and normal data
-            auto vertices       = getBufferData<glm::vec3>(model, primitive.attributes.at("POSITION"));
+            // Extract vertex data
+            auto vertices = getBufferData<glm::vec3>(model, primitive.attributes.at("POSITION"));
             
             const glm::vec3* normals = nullptr;
             bool hasNormals = false;
-            if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end())
+            if (primitive.attributes.find("NORMAL") != primitive.attributes.end())
             {
                 normals = getBufferData<glm::vec3>(model, primitive.attributes.at("NORMAL"));
                 hasNormals = true;
@@ -269,20 +386,37 @@ bool SceneManager::parseGltfFile(const std::string& filePath, const std::string&
             
             for (size_t i = 0, count = indices.size(); i < count; i += 3, ++dst) {             
 
-                size_t index[3] = { indices[i], indices[i + 1], indices[i + 2] };
+                uint32_t idx[3] = { indices[i], indices[i + 1], indices[i + 2] };
 
                 for (int e = 0; e < 3; e++)
                 {
-                    dst->pos[e] = vertices[index[e]];
-                    if (hasUvs) dst->uv[e] = uvs[index[e]];
-                    if (hasNormals) dst->normal[e] = normals[index[e]];
+                    // Apply world transform to position
+                    glm::vec4 worldPos = worldTransform * glm::vec4(vertices[idx[e]], 1.0f);
+                    dst->pos[e] = glm::vec3(worldPos);
 
+                    if (hasUvs) dst->uv[e] = uvs[idx[e]];
+
+                    if (hasNormals) {
+                        // Transform normal by the normal matrix
+                        dst->normal[e] = glm::normalize(normalMatrix * normals[idx[e]]);
+                    }
+                }
+
+                // If no normals in the file, compute a flat face normal from the (transformed) positions
+                if (!hasNormals) {
+                    glm::vec3 faceNormal = glm::normalize(glm::cross(
+                        dst->pos[1] - dst->pos[0],
+                        dst->pos[2] - dst->pos[0]));
+                    dst->normal[0] = faceNormal;
+                    dst->normal[1] = faceNormal;
+                    dst->normal[2] = faceNormal;
                 }
 
                 if (hasTangents)
                 {
                     for (int e = 0; e < 3; e++) {
-                        dst->tangent[e] = tangents[index[e]];
+                        glm::vec3 tVec = glm::normalize(glm::mat3(worldTransform) * glm::vec3(tangents[idx[e]]));
+                        dst->tangent[e] = glm::vec4(tVec, tangents[idx[e]].w);
                     }
                 } else {
                     //TODO: Should use Mikktspace algorithm http://www.mikktspace.com/

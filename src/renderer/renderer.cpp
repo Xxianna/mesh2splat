@@ -234,7 +234,7 @@ void Renderer::enableRenderPass(std::string renderPassName)
 
 void Renderer::setViewportResolutionForConversion(int resolutionTarget)
 {
-    renderContext.resolutionTarget = int(resolutionTarget / renderContext.dataMeshAndGlMesh.size());
+    renderContext.resolutionTarget = resolutionTarget;
 }
 
             

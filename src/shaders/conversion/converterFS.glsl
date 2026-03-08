@@ -16,6 +16,7 @@ uniform int hasAlbedoMap;
 uniform int hasNormalMap;
 uniform int hasMetallicRoughnessMap;
 uniform vec4 u_materialFactor;
+uniform int u_maxGaussians;
 
 struct GaussianVertex {
     vec4 position;
@@ -43,6 +44,11 @@ in vec4 Quaternion;
 void main() {
     
     uint index = atomicCounterIncrement(g_validCounter);
+
+    // Bounds check: discard if we've exceeded the buffer capacity
+    if (index >= uint(u_maxGaussians)) {
+        discard;
+    }
 
     vec4 out_Color = vec4(0,0,0,1);
 
