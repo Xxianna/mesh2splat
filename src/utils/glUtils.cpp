@@ -76,6 +76,10 @@ namespace glUtils
 
         shaderLocations.depthPrepassVertexShaderLocation                = (shadersBase / "rendering" / "depthPrepassVS.glsl").string();
         shaderLocations.depthPrepassFragmentShaderLocation                = (shadersBase / "rendering" / "depthPrepassPS.glsl").string();
+
+        shaderLocations.meshRenderVertexShaderLocation                   = (shadersBase / "rendering" / "meshRenderVS.glsl").string();
+        shaderLocations.meshRenderFragmentShaderLocation                 = (shadersBase / "rendering" / "meshRenderPS.glsl").string();
+
     }
 
     void initializeShaderFileMonitoring(ShaderRegistry& shaderRegistry)
@@ -128,6 +132,13 @@ namespace glUtils
             { shaderLocations.depthPrepassVertexShaderLocation, GL_VERTEX_SHADER },
             { shaderLocations.depthPrepassFragmentShaderLocation, GL_FRAGMENT_SHADER }
         });
+
+        //MESH COLOR RENDERING (split-screen)
+        shaderRegistry.registerShaderProgram(ShaderProgramTypes::MeshRenderProgram, {
+            { shaderLocations.meshRenderVertexShaderLocation, GL_VERTEX_SHADER },
+            { shaderLocations.meshRenderFragmentShaderLocation, GL_FRAGMENT_SHADER }
+        });
+
 
     }
 

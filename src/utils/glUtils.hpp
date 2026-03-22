@@ -38,6 +38,10 @@ namespace glUtils
 
         std::string depthPrepassVertexShaderLocation;
         std::string depthPrepassFragmentShaderLocation;
+
+        std::string meshRenderVertexShaderLocation;
+        std::string meshRenderFragmentShaderLocation;
+
     };
 
     extern ShaderLocations shaderLocations;
@@ -55,6 +59,7 @@ namespace glUtils
         ShadowPrepassComputeProgram,
         ShadowCubemapPassProgram,
         DepthPrepassProgram,
+        MeshRenderProgram,
     };
 
     void initializeShaderLocations();

@@ -201,7 +201,7 @@ void main() {
 		computedNormal_Ws = vec4(rgbN, gaussian.color.a);  
 	}
 
-	if (u_renderMode == 0)
+	if (u_renderMode == 0 || u_renderMode == 6)
 	{
 		outputColor = gaussian.color;
 
