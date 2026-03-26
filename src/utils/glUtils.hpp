@@ -42,6 +42,8 @@ namespace glUtils
         std::string meshRenderVertexShaderLocation;
         std::string meshRenderFragmentShaderLocation;
 
+        std::string commonShaderLocation;
+
     };
 
     extern ShaderLocations shaderLocations;
@@ -93,6 +95,7 @@ namespace glUtils
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     };
 
+    std::string resolveIncludes(const std::string& source, const fs::path& baseDir);
     std::string readShaderFile(const char* filePath);
 
     namespace fs = std::experimental::filesystem;
@@ -115,6 +118,7 @@ namespace glUtils
     struct ShaderProgramInfo {
         ShaderProgramTypes programType;
         std::vector<ShaderInfo> shaders;
+        std::vector<std::shared_ptr<ShaderFileInfo>> dependencies;
         GLuint programID; 
     };
 

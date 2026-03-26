@@ -29,6 +29,8 @@ uniform vec4 u_baseColorFactor;
 uniform vec2 u_nearFar;
 uniform int u_renderMode;
 
+#include "common.glsl"
+
 void main() {
     // Albedo
     vec4 albedo = u_baseColorFactor;
@@ -49,8 +51,8 @@ void main() {
         N = normalize(TBN * mappedNormal);
     }
 
-    // Encode normal to [0,1] range (matching splat convention: normal * 0.5 + 0.5)
-    vec3 encodedNormal = N * 0.5 + 0.5;
+    // Encode normal to [0,1] range (matching splat convention)
+    vec3 encodedNormal = encodeNormal(N);
 
     // Metallic-roughness
     vec2 metalRough = vec2(0.1, 0.5); // defaults
@@ -59,9 +61,7 @@ void main() {
     }
 
     // Depth visualization (matching splat prepass convention)
-    float normalizedDepth = (v_viewDepth - u_nearFar.x) / (u_nearFar.y - u_nearFar.x);
-    float invertedLinearizedDepth = clamp(normalizedDepth, 0, 1);
-    float computedDepth = clamp(exp(-20.0 * invertedLinearizedDepth), 0, 1);
+    float computedDepth = computeExponentialDepth(v_viewDepth, u_nearFar);
 
     // Per-triangle random color for geometry visualization (matches splat per-gaussian random)
     float triHash = fract(sin(float(gl_PrimitiveID) * 127.1) * 43758.5453);
