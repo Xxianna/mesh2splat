@@ -248,6 +248,9 @@ void GuiRendererConcreteMediator::startBatchJob(ImGuiUI::BatchItem* job, ImGuiUI
     renderer.resetModelMatrices();
     renderer.setFormatType(0); 
 
+    // Set gaussian std to match manual mode (default value from ImGuiUI)
+    renderer.setStdDevFromImGui(ui.getGaussianStd());
+
     if (isGlb(job->ext)) {
         renderer.getSceneManager().loadModel(job->path, job->parent);
         renderer.gaussianBufferFromSize(ui.getResolutionTarget() * ui.getResolutionTarget());
